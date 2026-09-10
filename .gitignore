@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+
+# Project Specific
+api_config.json
+system.log
+parse_error.log
+output/
+split_output/
+split_test_output/
+orgin-txt/
+income/
+prompt_history/
+*.bak
+*.tmp
+st_out.txt
+st_err.txt
