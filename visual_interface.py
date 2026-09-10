@@ -28,7 +28,7 @@ from record_parser import (
 
 # ---- 页面配置（须在其他 st 调用前） ----
 st.set_page_config(
-    page_title="门诊病历处理工具",
+    page_title="规培手写门诊病历自动排版",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -757,8 +757,8 @@ with st.sidebar:
 # =====================================================================
 # 主区
 # =====================================================================
-st.title("门诊病历处理工具")
-st.markdown("将非结构化门诊病历批量转为标准 JSON。支持多患者切割、AI 改写与模板填充。")
+st.title("规培手写门诊病历自动排版")
+st.markdown("把混乱的跟师/规培门诊病历 → AI 改写 → 校验切割 → 填入手写模板 JSON。")
 
 
 def render_pipeline(active: int = 1):

@@ -90,7 +90,7 @@ def start_app(port):
 
 def main():
     print("="*40)
-    print("    门诊病历处理工具 - 启动程序")
+    print("    规培手写门诊病历自动排版 - 启动程序")
     print("="*40)
 
     # 1. 环境检查
