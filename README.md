@@ -1,9 +1,15 @@
 # 规培手写门诊病历自动排版
 
-> 给中医规培同学用的门诊病历「自动抄写」流水线  
+> 给中医规培同学用的门诊病历「自动抄写」流水线，解决手抄病历的难题  
 > 乱文本 → 切割 / AI 改写 / 格式转换 / 校验 → **奎享雕刻**可直接导入的 JSON
 
 ---
+请加入QQ群：760335197
+<img width="1284" height="2283" alt="76aa222e0008e49f1af797d05d4acd66" src="https://github.com/user-attachments/assets/d3fb1b55-7de3-4f4d-bf34-4c06420da3ee" />
+好用的话请赞助我，以覆盖服务器成本
+<img width="1242" height="1692" alt="4fda66a4b8806c319bdadee25f227950" src="https://github.com/user-attachments/assets/9f9db94d-33cd-485b-9575-1da3555aaf88" />
+
+
 
 ## 解决什么问题
 
