@@ -5,9 +5,17 @@
 
 ---
 请加入QQ群：760335197
-<img width="1284" height="2283" alt="76aa222e0008e49f1af797d05d4acd66" src="https://github.com/user-attachments/assets/d3fb1b55-7de3-4f4d-bf34-4c06420da3ee" />
+<div align="center">
+
+### ☕ 赞助支持
+
 好用的话请赞助我，以覆盖服务器成本
-<img width="1242" height="1692" alt="4fda66a4b8806c319bdadee25f227950" src="https://github.com/user-attachments/assets/9f9db94d-33cd-485b-9575-1da3555aaf88" />
+
+| 微信赞助 | QQ群二维码 |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/d3fb1b55-7de3-4f4d-bf34-4c06420da3ee" width="200" /> | <img src="https://github.com/user-attachments/assets/9f9db94d-33cd-485b-9575-1da3555aaf88" width="200" /> |
+
+</div>
 
 
 
