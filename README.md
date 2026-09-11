@@ -64,9 +64,15 @@ python -m venv .venv
 
 # 3. 启动（会检查依赖、处理端口占用）
 python start.py
+
+# 非交互 / 脚本化：
+python start.py --yes              # 自动装缺依赖并启动
+python start.py --restart          # 端口占用时重启「本应用」
+python start.py --stop             # 只停止本应用
+python start.py --port 8502        # 换端口
 ```
 
-浏览器会打开 `http://localhost:8501`。  
+浏览器会打开 `http://127.0.0.1:8501`。  
 也可以直接：`streamlit run visual_interface.py`
 
 ### 配置 AI 接口
@@ -143,16 +149,40 @@ python start.py
 
 ## 注意事项
 
-- 上传 txt 请使用 **UTF-8** 编码。
+- 上传 txt 请使用 **UTF-8** 编码（GBK 会尝试自动回退）。
 - AI 改写会消耗 Token；批量前建议先用 1 个文件试跑。
 - **患者隐私**：走第三方 API 时请确认是否需要脱敏；可接本地模型。
 - `api_config.json` 已在 `.gitignore` 中，不会被提交到仓库。
+- **上线前**：请将真实 API Key 从 `api_config.json` 挪到环境变量（优先级更高）：
+  ```powershell
+  $env:CLINIC_API_KEY = "sk-..."
+  # 或 DEEPSEEK_API_KEY / OPENAI_API_KEY
+  ```
+- Streamlit 默认只监听 `127.0.0.1`。若需局域网访问，请自行评估 PHI 暴露风险后再改 `.streamlit/config.toml`。
+- 输出目录输入会被限制在项目目录内，防止误写到系统路径。
+
+## 上线检查清单
+
+1. `python test_record_parser.py` 与 `python test_stability.py` 全部通过  
+2. 环境变量提供 API Key；`api_config.json` 中不含真实密钥，或密钥不会随仓库分发  
+3. `.streamlit/config.toml` 的 `address` 仍为 `127.0.0.1`（或已加鉴权反代）  
+4. 确认 `output/`、`split_output/`、日志中无遗留真实患者信息再打包分发  
+5. 在侧边栏「测试连接」绿后再批量跑
 
 ## 测试
 
 ```bash
-python test_record_parser.py   # 解析/校验/切割/映射
+python test_record_parser.py   # 解析/校验/切割/映射/路径安全
 python test_stability.py       # 边界、API 重试、CLI、历史样例回归
+python test_ui_app.py          # Streamlit AppTest：界面可渲染、按钮校验
+```
+
+CLI 示例：
+
+```bash
+python extract_medical_record.py --input a.txt --output a.json
+python extract_medical_record.py --input a.txt --template "template/门诊小病例模板.json" --output a.json --strict
+python split_records.py --input multi.txt --output split_output
 ```
 
 ## 常见问题

@@ -91,12 +91,31 @@ def _normalize_heading_line(line: str) -> str:
     return s
 
 
+_MD_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+", re.MULTILINE)
+_MD_BOLD_LINE_RE = re.compile(r"^[ \t]*\*\*(.+?)\*\*[ \t]*$", re.MULTILINE)
+
+
+def normalize_ai_output(text: str) -> str:
+    """清洗模型输出：去围栏/Markdown 标题与加粗，便于章节解析。"""
+    if not text:
+        return text
+    s = text.strip()
+    fence = re.match(r"^```[a-zA-Z0-9_-]*\s*\n(.*)\n```\s*$", s, re.DOTALL)
+    if fence:
+        s = fence.group(1).strip()
+    s = _MD_HEADING_RE.sub("", s)
+    s = _MD_BOLD_LINE_RE.sub(r"\1", s)
+    # 行内 **标题**：保留文字，去掉标记
+    s = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", s)
+    return s.strip()
+
+
 def _build_heading_pattern(keywords: Sequence[str]) -> re.Pattern:
-    """构造行首标题正则，允许空白和中英文冒号。"""
+    """构造行首标题正则，允许空白、Markdown/强调标记和中英文冒号。"""
     alts = "|".join(re.escape(k) for k in keywords)
-    # 允许：可选空白 + 标题 + 可选冒号/顿号/空格
+    # 允许: 可选空白 + 可选 markdown/bold/书名号前缀 + 标题 + 可选后缀 + 可选冒号
     return re.compile(
-        r"^[ \t]*(?:" + alts + r")[ \t]*[:：、.．]?[ \t]*",
+        r"^[ \t]*(?:#{1,6}\s*|\*\*|__)?[ \t]*(?:" + alts + r")[ \t]*(?:\*\*|__)?[ \t]*[:：、.．]?[ \t]*",
         re.MULTILINE,
     )
 
@@ -376,6 +395,19 @@ def split_patient_records(
     return records
 
 
+def _unique_path(path: Path) -> Path:
+    """避免同名覆盖：name.txt → name_2.txt / name_3.txt …"""
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    n = 2
+    while True:
+        candidate = path.with_name(f"{stem}_{n}{suffix}")
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 def write_split_files(
     records: List[PatientRecord],
     output_dir: Path,
@@ -391,10 +423,10 @@ def write_split_files(
             continue
         stem = rec.filename_stem
         filename = f"{file_prefix}-{idx}-{stem}.txt" if file_prefix else f"{idx}-{stem}.txt"
-        out_path = output_dir / filename
+        out_path = _unique_path(output_dir / filename)
         out_path.write_text(rec.content, encoding="utf-8")
         written.append(out_path)
-        logger.info("生成文件: %s", filename)
+        logger.info("生成文件: %s", out_path.name)
         idx += 1
     return written
 
@@ -432,6 +464,70 @@ def get_available_templates(template_dir: Path | str = "template") -> List[str]:
         if not t.name.endswith(".map.json")
     ]
     return sorted(templates)
+
+
+def _unique_dest(dest: Path) -> Path:
+    if not dest.exists():
+        return dest
+    n = 2
+    while True:
+        cand = dest.with_name(f"{dest.stem}_{n}{dest.suffix}")
+        if not cand.exists():
+            return cand
+        n += 1
+
+
+def install_custom_template(
+    template_bytes: bytes,
+    *,
+    filename: str,
+    template_dir: Path | str = "template",
+    map_bytes: Optional[bytes] = None,
+    map_filename: Optional[str] = None,
+) -> Path:
+    """把用户上传的模板/映射写入 template/，返回模板文件路径。
+
+    - 模板必须是 JSON，且含 items 列表
+    - 映射可选；若提供则校验五段键
+    - 重名时自动 _2/_3
+    """
+    template_dir = Path(template_dir)
+    template_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_name = Path(filename or "custom.json").name
+    # 避免把 map.json 当成正式模板
+    if raw_name.endswith(".map.json"):
+        raw_name = raw_name[: -len(".map.json")] + ".json"
+    if not raw_name.lower().endswith(".json"):
+        raw_name += ".json"
+    safe = _sanitize_filename_part(Path(raw_name).stem) or "custom"
+    dest = _unique_dest(template_dir / f"{safe}.json")
+
+    try:
+        data = json.loads(template_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise ValueError(f"模板不是合法 JSON: {e}") from e
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        raise ValueError("模板 JSON 需包含 items 数组（奎享工程导出结构）")
+    dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if map_bytes:
+        map_raw = Path(map_filename or (dest.stem + ".map.json")).name
+        if not map_raw.endswith(".map.json"):
+            map_raw = dest.stem + ".map.json"
+        try:
+            map_data = json.loads(map_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ValueError(f"映射文件不是合法 JSON: {e}") from e
+        if not isinstance(map_data, dict) or not all(k in map_data for k in SECTION_ORDER):
+            raise ValueError("映射需包含五段键: " + "、".join(SECTION_ORDER))
+        map_path = dest.with_suffix(".map.json")
+        map_path.write_text(
+            json.dumps(map_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    logger.info("已导入自定义模板: %s", dest.name)
+    return dest
 
 
 def fill_template_with_sections(
@@ -473,6 +569,53 @@ def process_text_to_template_json(
         json.dumps(filled, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# 路径安全 / 文本解码
+# ---------------------------------------------------------------------------
+
+def safe_project_path(
+    user_path: str,
+    *,
+    base_dir: Optional[Path] = None,
+    default_subdir: str = "output",
+) -> Path:
+    """把界面输入的相对/绝对路径限制在项目目录内，防目录穿越。
+
+    - 空输入 → base/default_subdir
+    - 含 .. 或解析后落在项目外 → 回退到 base/default_subdir
+    """
+    base = (base_dir or Path.cwd()).resolve()
+    raw = (user_path or "").strip()
+    if not raw:
+        return (base / default_subdir).resolve()
+
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return (base / default_subdir).resolve()
+
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        logger.warning("输出路径越出项目目录，已回退到 %s/%s: %s", base, default_subdir, raw)
+        return (base / default_subdir).resolve()
+    return resolved
+
+
+def decode_upload_bytes(data: bytes, filename: str = "") -> str:
+    """按 UTF-8 → GBK → latin-1 顺序解码上传内容，避免硬失败。"""
+    for enc in ("utf-8", "gbk", "utf-8-sig"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    logger.warning("文件 %s 非 UTF-8/GBK，已用 replace 解码", filename)
+    return data.decode("utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------

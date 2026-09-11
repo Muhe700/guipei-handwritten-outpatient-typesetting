@@ -1,0 +1,24 @@
+[theme]
+base = "light"
+primaryColor = "#2D6A5A"
+backgroundColor = "#F4F6F4"
+secondaryBackgroundColor = "#EEF2EF"
+textColor = "#1A2E28"
+font = "sans serif"
+
+[server]
+headless = true
+# 上线前默认只监听本机，避免局域网误暴露（含 PHI 与日志）
+address = "127.0.0.1"
+enableXsrfProtection = true
+maxUploadSize = 200
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# 收起右上角 Deploy / 多余工具条，本机工具更干净
+toolbarMode = "minimal"
+# 本地排错保留堆栈；正式对外可改为 "type" 或 "none"
+showErrorDetails = "stacktrace"

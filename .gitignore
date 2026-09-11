@@ -32,15 +32,25 @@ ENV/
 
 # Project Specific
 api_config.json
+api_config.json.bak
 system.log
+system.log.*
 parse_error.log
+parse_error.log.*
 output/
 split_output/
 split_test_output/
 orgin-txt/
 income/
 prompt_history/
+# 私有模板（含字体/版式/示例文案），仅本机使用
+template/
 *.bak
 *.tmp
 st_out.txt
 st_err.txt
+st_out.log
+st_err.log
+st_out.log.*
+st_err.log.*
+.app.pid

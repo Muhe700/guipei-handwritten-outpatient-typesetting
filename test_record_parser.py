@@ -11,6 +11,7 @@ from pathlib import Path
 from record_parser import (
     DEFAULT_SECTION_MAP,
     SECTION_ORDER,
+    decode_upload_bytes,
     extract_sections,
     fill_template_with_sections,
     load_section_map,
@@ -18,6 +19,7 @@ from record_parser import (
     parse_disease_from_content,
     parse_name_age_from_name_line,
     process_text_to_template_json,
+    safe_project_path,
     save_failed_case,
     sections_complete,
     split_patient_records,
@@ -217,24 +219,65 @@ def test_end_to_end_and_failed():
 
 def test_regression_samples():
     print("\n== 历史样例回归 ==")
-    sample = Path("output/AI_Rewrite/1-施志刚-51岁[]-西医：腰椎间盘突出-1-XXX-51岁-未知病名.txt")
-    if not sample.exists():
-        # 尝试 glob
-        cands = list(Path("output/AI_Rewrite").glob("*.txt")) if Path("output/AI_Rewrite").exists() else []
-        if not cands:
-            check("历史样例存在", False, "no samples")
-            return
-        sample = cands[0]
+    # 真实样例可能因隐私清理不存在；用合成标准五段做回归，有历史文件时再补跑
+    from record_parser import PatientRecord
 
-    text = sample.read_text(encoding="utf-8")
+    text = GOOD_TEXT
     extracted = extract_sections(text)
     ok, missing = sections_complete(extracted)
-    check(f"样例可抽全五段 ({sample.name})", ok, f"missing={missing}")
-
-    # 切割样例文件名不应再带 []
-    from record_parser import PatientRecord
+    check("合成样例可抽全五段", ok, f"missing={missing}")
     rec = PatientRecord(name="施志刚", age="51岁", disease="腰椎间盘突出", content=text)
     check("文件名无方括号", "[" not in rec.filename_stem and "]" not in rec.filename_stem, rec.filename_stem)
+
+    sample_dir = Path("output/AI_Rewrite")
+    if sample_dir.exists():
+        cands = list(sample_dir.glob("*.txt"))
+        if cands:
+            sample = cands[0]
+            s_text = sample.read_text(encoding="utf-8")
+            s_ok, s_missing = sections_complete(extract_sections(s_text))
+            check(f"磁盘样例可抽全五段 ({sample.name})", s_ok, f"missing={s_missing}")
+        else:
+            print("  [SKIP] output/AI_Rewrite 为空（隐私清理后无历史样例）")
+    else:
+        print("  [SKIP] 无 output/AI_Rewrite 目录")
+
+
+def test_install_custom_template():
+    print("\n== 导入自定义模板 ==")
+    import tempfile as tf
+    from record_parser import get_available_templates, install_custom_template, load_section_map
+
+    tpl = json.dumps({"items": [{"name": "元素14"}, {"name": "元素9"}, {"name": "元素11"}, {"name": "元素12"}, {"name": "元素13"}]}, ensure_ascii=False)
+    mp = json.dumps({
+        "四诊": "元素14", "病因病机分析": "元素9", "中医诊断及辩证": "元素11",
+        "治法": "元素12", "处方": "元素13",
+    }, ensure_ascii=False)
+
+    with tf.TemporaryDirectory() as td:
+        td_path = Path(td)
+        dest = install_custom_template(
+            tpl.encode("utf-8"), filename="我的模板.json",
+            template_dir=td_path, map_bytes=mp.encode("utf-8"), map_filename="我的模板.map.json",
+        )
+        check("写入模板文件", dest.exists() and dest.name.endswith(".json"), str(dest))
+        check("写出映射", dest.with_suffix(".map.json").exists())
+        check("可扫描到", dest.name in get_available_templates(td_path), str(get_available_templates(td_path)))
+        check("映射可读", load_section_map(dest).get("四诊") == "元素14")
+
+        # 坏 JSON
+        try:
+            install_custom_template(b"not-json", filename="bad.json", template_dir=td_path)
+            check("坏JSON拒绝", False)
+        except ValueError:
+            check("坏JSON拒绝", True)
+
+        # 无 items
+        try:
+            install_custom_template(b"{}", filename="noitems.json", template_dir=td_path)
+            check("无items拒绝", False)
+        except ValueError:
+            check("无items拒绝", True)
 
 
 def test_map_json_excluded():
@@ -263,6 +306,60 @@ def test_map_json_excluded():
         filled = fill_template_with_sections(tmpl, extracted, smap)
         item_map = {it["name"]: it.get("text", "") for it in filled["items"]}
         check("按自定义映射写入", "主诉" in item_map.get("A", ""), item_map.get("A", "")[:30])
+
+
+def test_api_thinking_payload():
+    print("\n== 关闭思考参数 ==")
+    from unittest.mock import MagicMock, patch
+    import api_client
+
+    ok_resp = MagicMock()
+    ok_resp.status_code = 200
+    ok_resp.json.return_value = {
+        "choices": [{"message": {"content": "正文"}, "finish_reason": "stop"}]
+    }
+    ok_resp.raise_for_status = MagicMock()
+    ok_resp.text = "{}"
+
+    with patch("api_client.requests.post", return_value=ok_resp) as mock_post:
+        text = api_client.call_chat_completion(
+            "http://x", enable_thinking=False, max_retries=0
+        )
+        check("关闭思考时正文", text == "正文")
+        payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+        check("带 enable_thinking", payload.get("enable_thinking") is False, str(payload))
+        check("带 chat_template_kwargs", payload.get("chat_template_kwargs") == {"enable_thinking": False})
+
+    with patch("api_client.requests.post", return_value=ok_resp) as mock_post2:
+        api_client.call_chat_completion("http://x", enable_thinking=True, max_retries=0)
+        payload2 = mock_post2.call_args.kwargs.get("json") or mock_post2.call_args[1].get("json")
+        check("开启思考时不注入字段", "enable_thinking" not in payload2)
+
+
+def test_api_content_extraction():
+    print("\n== API 正文提取 ==")
+    from api_client import _empty_content_error, _extract_message_text
+
+    t, src = _extract_message_text({"content": "  你好  "})
+    check("普通 content", t == "你好" and src == "content")
+
+    t, src = _extract_message_text({"content": "", "reasoning_content": "推理后的正文"})
+    check("回退 reasoning_content", t == "推理后的正文" and src == "reasoning_content")
+
+    t, src = _extract_message_text({"content": None, "thinking": "T"})
+    check("回退 thinking", t == "T" and src == "thinking")
+
+    t, src = _extract_message_text({"content": [{"type": "text", "text": "列表正文"}]})
+    check("列表 content", t == "列表正文" and src == "content")
+
+    t, src = _extract_message_text({"content": ""})
+    check("全空", t == "" and src == "")
+
+    err = _empty_content_error({
+        "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+        "usage": {"completion_tokens": 4000},
+    })
+    check("空正文错误信息含 max_tokens 提示", "Max Tokens" in str(err) or "max_tokens" in str(err).lower(), str(err))
 
 
 def test_api_client_retry():
@@ -342,6 +439,60 @@ def test_prompt_version_helpers():
         check("快照可读回", loaded.get("system_prompt") == "s" and "{raw_text}" in loaded.get("user_prompt_template", ""))
 
 
+def test_path_and_decode_safety():
+    print("\n== 路径安全 / 解码 / 同名不覆盖 ==")
+    from pathlib import Path as P
+    import tempfile as tf
+    from record_parser import PatientRecord
+
+    base = P.cwd().resolve()
+    escaped = safe_project_path("../Windows/System32", base_dir=base)
+    check("目录穿越回退", escaped == (base / "output").resolve(), str(escaped))
+    ok_path = safe_project_path("output", base_dir=base)
+    check("相对输出目录合法", ok_path == (base / "output").resolve(), str(ok_path))
+    empty = safe_project_path("", base_dir=base, default_subdir="split_output")
+    check("空输入用默认目录", empty == (base / "split_output").resolve(), str(empty))
+
+    check("UTF-8解码", decode_upload_bytes("姓名：张三".encode("utf-8")) == "姓名：张三")
+    check("GBK解码回退", decode_upload_bytes("姓名：张三".encode("gbk")) == "姓名：张三")
+    check("坏字节不炸", "姓名" in decode_upload_bytes(b"\xff\xfe" + "姓名".encode("utf-8")))
+
+    with tf.TemporaryDirectory() as td:
+        td = P(td)
+        recs = [
+            PatientRecord("张三", "44岁", "痹症", "内容A"),
+            PatientRecord("张三", "44岁", "痹症", "内容B"),
+        ]
+        written = write_split_files(recs, td)
+        check("同名生成2个文件", len(written) == 2 and written[0] != written[1], str(written))
+        check("文件内容未覆盖",
+              written[0].read_text(encoding="utf-8") == "内容A"
+              and written[1].read_text(encoding="utf-8") == "内容B")
+
+
+def test_multi_patient_partial_missing():
+    print("\n== 多患者缺段应被检出 ==")
+    multi = """姓名：甲
+主诉：头痛。
+病因病机分析：气血不畅。
+中医诊断及辩证：头痛；血瘀证。
+治法：活血。
+处方：针刺百会。
+
+姓名：乙
+主诉：失眠。
+"""
+    extracted = extract_sections(multi)
+    ok, missing = sections_complete(extracted)
+    check("整体文本首患者五段齐全", ok, str(missing))
+
+    records = split_patient_records(multi)
+    check("切割为2人", len(records) == 2, str(len(records)))
+    vals = [validate_rewritten_text(r.content, require_patient_header=False) for r in records]
+    check("第1人齐全", vals[0].ok, str(vals[0].errors))
+    check("第2人缺段失败", (not vals[1].ok) and vals[1].errors, str(vals[1].errors))
+
+
 def main():
     print("========== record_parser 自测 ==========")
     test_extract_sections()
@@ -352,8 +503,13 @@ def main():
     test_end_to_end_and_failed()
     test_regression_samples()
     test_map_json_excluded()
+    test_install_custom_template()
+    test_api_thinking_payload()
+    test_api_content_extraction()
     test_api_client_retry()
     test_prompt_version_helpers()
+    test_path_and_decode_safety()
+    test_multi_patient_partial_missing()
     print("\n" + "=" * 40)
     print(f"结果: PASS={PASS}  FAIL={FAIL}")
     if FAIL:
